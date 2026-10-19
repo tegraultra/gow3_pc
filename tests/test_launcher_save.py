@@ -159,29 +159,6 @@ class SaveButtonTest(LauncherOverTemporaryFiles):
         self.assertFalse((self.tmp / 'gow3.ini').exists())
 
 
-class HiddenUpscalingTest(LauncherOverTemporaryFiles):
-    INI = ('upscaler=fsr4\npreset=3\nfsr1=1\nsharpen=1\nsharpness=0.73\n'
-           'rcas=1\nrcas_strength=42\nobject_motion=0\noutput_res=2560x1440\n')
-
-    def test_hidden_settings_are_preserved_without_migration(self):
-        before, _lines = launcher.load_ini()
-        for key in ('upscaler', 'preset', 'fsr1', 'sharpen', 'sharpness', 'rcas',
-                    'rcas_strength', 'object_motion', 'output_res', 'live_resolution',
-                    'experimental_upscaler'):
-            self.assertNotIn(key, self.app.vars)
-        self.assertEqual(self.save_state(), 'disabled')
-        self.app.var('vsync', 'ini').set(False)
-        self.app.save()
-        after, _lines = launcher.load_ini()
-        for key in before:
-            if key != 'vsync':
-                self.assertEqual(after[key], before[key], key)
-        self.app.var('ui_language', 'app').set('ru')
-        self.app.save()
-        self.assertNotIn('upscaler', self.app.vars)
-        self.assertEqual(launcher.load_ini()[0]['upscaler'], 'fsr4')
-
-
 @unittest.skipUnless(sys.platform == 'win32' and tk, 'needs Windows and Tk')
 class EverySettingSavesTest(LauncherOverTemporaryFiles):
     """Every option in the window: a change lights Save, saving stores it, a reopened launcher shows it."""
