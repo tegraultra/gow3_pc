@@ -404,7 +404,7 @@ ANISOTROPY = [('0', ('Game default',)), ('2', ('2x',)), ('4', ('4x',)), ('8', ('
 FPS_LIMITS = [('30', ('30',)), ('60', ('60',)), ('100', ('100',)), ('120', ('120',)), ('240', ('240',)), ('0', ('Unlimited',))]
 # The sidebar's pages, top to bottom, and the methods that refresh a page's lists when it is shown.
 PAGES = ('home', 'graphics', 'performance', 'game', 'controls', 'mods', 'advanced')
-PAGE_REFRESH = {'home': ('refresh_status',), 'game': ('refresh_game_patches',), 'mods': ('refresh_lists',)}
+PAGE_REFRESH = {'home': ('refresh_status',), 'graphics': ('refresh_fsr4',), 'game': ('refresh_game_patches',), 'mods': ('refresh_lists',)}
 UI_SCALES = [('auto', ('Auto',)), ('1', ('1x',)), ('2', ('2x',))]
 APP_DEFAULTS = {'ui_language': 'en', 'ui_scale': 'auto', 'game_dir': os.environ.get('GOW3_GAME_DIR', str(PORT_DIR.parent / 'CUSA01623') if WINDOWS else ''), 'update_dir': '', 'experimental_upscaler': False,
                 'video_backend': 'auto', 'gamemode': False, 'mangohud': False, 'desktop_integration': True, 'user_dir': '',
@@ -662,7 +662,9 @@ def migrate_controls(saved):
     saved['controls_layout'] = CONTROLS_LAYOUT
     return saved
 
-UPSCALERS = [('fsr3', ('FSR 3.1 (every GPU)', 'FSR 3.1 (любая видеокарта)')),
+UPSCALERS = [('fsr4', ('FSR 4 (best quality)', 'FSR 4 (лучшее качество)')),
+             ('fsr411', ('FSR 4.1.1 (needs fsr4_411 assets)', 'FSR 4.1.1 (нужны ассеты fsr4_411)')),
+             ('fsr3', ('FSR 3.1 (every GPU)', 'FSR 3.1 (любая видеокарта)')),
              ('taa', ('TAA (native resolution anti-aliasing)', 'TAA (нативное сглаживание)')),
              ('off', ('Off', 'Выключен'))]
 PRESETS = [('0', ('Native AA (×1.0)',)), ('1', ('Quality (×1.5)',)), ('2', ('Balanced (×1.7)',)),
@@ -693,11 +695,32 @@ STREAM_MEMORY = [('cached', ('System RAM (cached, default)',)),
 FRAMES_QUEUED = [('1', ('1 (lowest latency)',)), ('2', ('2',)), ('0', ('Unlimited',))]
 UI_LANGUAGES = gow3_lang.LANGUAGE_NAMES
 
+FSR4_COMMIT = 'ae8d628fae208813172446d1e49ed94150b04658'
+FSR4_BASE = f'https://raw.githubusercontent.com/FireBurn/Q2RTX/{FSR4_COMMIT}/baseq2/fsr4_shaders'
+
+
+def fsr4_files():
+    """The FSR 4 v07 asset set of tools/fetch_fsr4_assets.sh (1080 and 2160 tiers)."""
+    files = ['LICENSE-FSR4-v07.txt', 'rcas.spv', 'spd_auto_exposure.spv']
+    for model in ('native', 'quality', 'balanced', 'performance', 'ultraperf', 'drs'):
+        files += [f'fsr4_model_v07_i8_{model}_initializers.bin', f'fsr4_model_v07_i8_{model}_pre_weights.bin',
+                  f'fsr4_model_v07_i8_{model}_shader_manifest.json']
+        for tier in ('1080', '2160'):
+            files += [f'fsr4_model_v07_i8_{model}_{tier}_pre.spv', f'fsr4_model_v07_i8_{model}_{tier}_post.spv']
+            files += [f'fsr4_model_v07_i8_{model}_{tier}_pass{n}.spv' for n in range(1, 13)]
+    return files
+
+
 def fsr4_folder():
     """Next to the port; in the data directory when the port is read-only (AppImage)."""
     if WINDOWS or os.access(PORT_DIR, os.W_OK):
         return PORT_DIR / 'fsr4_shaders'
     return DATA_DIR / 'fsr4_shaders'
+
+
+def fsr4_missing():
+    folder = fsr4_folder()
+    return [name for name in fsr4_files() if not (folder / name).is_file() or not (folder / name).stat().st_size]
 
 
 def load_json(path, default):
@@ -1225,6 +1248,7 @@ class Launcher:
         self.ini, self.ini_lines = load_ini()
         self.vars = {}
         self.process = self.job = None
+        self.downloading = False
         self.output = queue.Queue()
         self.banner_source = self.banner_image = None
         self.ui_calls = queue.Queue()  # work for the Tk thread from helper threads
@@ -1739,33 +1763,52 @@ class Launcher:
             return self.banner_image.subsample(factor) if factor > 1 else self.banner_image
 
     def build_graphics(self):
-        """Window and overlay controls; temporal upscaling stays commented out."""
+        """Window and overlay controls, then the temporal upscalers (experimental)."""
         f = self.scrolled_page('graphics', _('Graphics', 'Графика'), _('How the game appears on your screen.'))
         self.build_display(f)
-        # Temporal upscaling is parked until its image quality is validated.
-        # self.section(f, _('Experimental'))
-        # self.check(f, 'experimental_upscaler', 'app', _('Enable the upscaler (experimental)'),
-        #            _('Off (default): the game runs without temporal upscaling; FSR 3.1 and TAA need this switch on. '
-        #              'FSR 3.1 is not calibrated for this game yet: expect ghosting or flicker. The remaining options require this switch; '
-        #              'leave it off for normal gameplay.',
-        #              'Выкл. (по умолчанию): игра без временного апскейлинга; FSR 3.1 и TAA нужен этот переключатель. '
-        #              'FSR 3.1 ещё не откалиброван для этой игры: возможны гостинг и мерцание.'), restart=True)
-        # self.section(f, _('Upscaling', 'Апскейлинг'))
-        # self.row(f, _('Upscaler', 'Апскейлер'), self.choice(f, 'upscaler', 'ini', UPSCALERS))
-        # self.row(f, _('Quality preset', 'Пресет'), self.choice(f, 'preset', 'ini', PRESETS),
-        #          _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
-        #            'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
-        # self.row(f, _('Output resolution', 'Разрешение вывода'), self.choice(f, 'output_res', 'ini', OUTPUTS),
-        #          _('What the upscaler produces; the HUD is drawn at this size too.',
-        #            'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
-        # self.row(f, _('Live resolution changes', 'Смена разрешения на лету'), self.choice(f, 'live_resolution', 'ini', LIVE),
-        #          _('Off: outputs other than 1080p are set by a patch at start (fastest; changing them in the '
-        #            'game restarts it). On: change output and preset in the game without a restart, at a cost.',
-        #            'Выкл.: разрешения кроме 1080p задаются патчем при запуске (быстрее). Вкл.: менять в игре '
-        #            'без перезапуска, но медленнее.'))
-        # self.check(f, 'object_motion', 'ini', _('Object motion vectors', 'Векторы движения объектов'),
-        #            _('Less ghosting on characters, cloth and weapons; costs about 10% FPS.',
-        #              'Меньше гостинга на персонажах и одежде; стоит около 10% FPS.'))
+        self.section(f, _('Experimental'))
+        self.check(f, 'experimental_upscaler', 'app', _('Enable the upscaler (experimental)'),
+                   _('Off (default): the game runs without temporal upscaling. These upscalers are not calibrated '
+                     'for this game yet: expect ghosting or flicker. FSR 3.1 needs nothing else; FSR 4 needs the '
+                     'assets below, and without them the game uses FSR 3.1. The options on this page only take '
+                     'effect with this switch on.',
+                     'Выкл. (по умолчанию): игра без временного апскейлинга. Эти апскейлеры ещё не откалиброваны '
+                     'для этой игры: возможны гостинг и мерцание. FSR 3.1 ничего не нужно; FSR 4 нужны ассеты '
+                     'ниже, без них игра использует FSR 3.1.'), restart=True)
+        self.section(f, _('Upscaling', 'Апскейлинг'))
+        self.row(f, _('Upscaler', 'Апскейлер'), self.choice(f, 'upscaler', 'ini', UPSCALERS),
+                 _("Temporal upscaling with the game's own motion vectors. FSR 4 needs its assets (below) and "
+                   'a GPU with INT8 dot products; otherwise the game falls back to FSR 3.1 by itself.',
+                   'Временной апскейлинг с векторами движения игры. FSR 4 нужны ассеты (ниже) и GPU с INT8; '
+                   'иначе игра сама переключится на FSR 3.1.'))
+        self.row(f, _('Quality preset', 'Пресет'), self.choice(f, 'preset', 'ini', PRESETS),
+                 _('Render scale per axis: Quality renders at 1/1.5 of the output size.',
+                   'Масштаб рендера по каждой оси: Quality рисует в 1/1.5 размера вывода.'))
+        self.row(f, _('Output resolution', 'Разрешение вывода'), self.choice(f, 'output_res', 'ini', OUTPUTS),
+                 _('What the upscaler produces; the HUD is drawn at this size too.',
+                   'Что выдаёт апскейлер; интерфейс рисуется в этом же размере.'))
+        self.row(f, _('Live resolution changes', 'Смена разрешения на лету'), self.choice(f, 'live_resolution', 'ini', LIVE),
+                 _('Off: outputs other than 1080p are set by a patch at start (fastest; changing them in the '
+                   'game restarts it). On: change output and preset in the game without a restart, at a cost.',
+                   'Выкл.: разрешения кроме 1080p задаются патчем при запуске (быстрее). Вкл.: менять в игре '
+                   'без перезапуска, но медленнее.'))
+        self.check(f, 'object_motion', 'ini', _('Object motion vectors', 'Векторы движения объектов'),
+                   _('Less ghosting on characters, cloth and weapons; costs about 10% FPS.',
+                     'Меньше гостинга на персонажах и одежде; стоит около 10% FPS.'))
+        self.section(f, _('FSR 4 assets', 'Ассеты FSR 4'))
+        self.fsr4_label = self.ttk.Label(f, text='', wraplength=self.px(640), justify='left')
+        self.fsr4_label.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w')
+        holder = self.ttk.Frame(f)
+        holder.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(8, 0))
+        self.fsr4_button = self.ttk.Button(holder, text=_('Download FSR 4 assets', 'Скачать ассеты FSR 4'),
+                                           command=self.download_fsr4)
+        self.fsr4_button.pack(side='left')
+        self.fsr4_progress = self.ttk.Progressbar(holder, length=280, maximum=len(fsr4_files()))
+        self.fsr4_progress.pack(side='left', padx=12)
+        self.note(f, _("From FireBurn/Q2RTX on GitHub (built from AMD's MIT-licensed FidelityFX source), "
+                       'about 30 MB, into the fsr4_shaders folder of the port.',
+                       'С GitHub FireBurn/Q2RTX (собраны из MIT-исходников AMD FidelityFX), около 30 МБ, '
+                       'в папку fsr4_shaders порта.'), top=6)
 
     def build_display(self, f):
         """Window and overlay: the top of the Graphics page."""
@@ -2432,6 +2475,42 @@ class Launcher:
         self.draw_banner()
         self.set_icon()
         self.refresh_status()
+
+    def refresh_fsr4(self):
+        total, missing = len(fsr4_files()), len(fsr4_missing())
+        self.fsr4_progress.configure(value=total - missing)
+        self.fsr4_label.configure(
+            text=_('Installed: {} files in {}.', 'Установлены: {} файлов в {}.').format(total, fsr4_folder())
+            if not missing else _('{} of {} files missing in {}.', 'Нет {} из {} файлов в {}.').format(
+                missing, total, fsr4_folder()))
+        self.fsr4_button.configure(state='normal' if missing and not self.downloading else 'disabled')
+
+    def download_fsr4(self):
+        self.downloading = True
+        self.fsr4_button.configure(state='disabled')
+        folder = fsr4_folder()
+
+        def work():
+            error = None
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                for name in fsr4_missing():
+                    part = folder / (name + '.part')
+                    with urllib.request.urlopen(f'{FSR4_BASE}/{name}', timeout=60) as response:
+                        part.write_bytes(response.read())
+                    part.replace(folder / name)
+                    self.ui_calls.put(self.refresh_fsr4)
+            except OSError as failure:
+                error = failure
+
+            def done():
+                self.downloading = False
+                self.refresh_fsr4()
+                self.refresh_status()
+                if error:
+                    self.messagebox.showerror('FSR 4', _('Download failed: {}', 'Не удалось скачать: {}').format(error))
+            self.ui_calls.put(done)
+        threading.Thread(target=work, daemon=True).start()
 
     def refresh_status(self):
         if getattr(self, 'copying_system_files', False):
