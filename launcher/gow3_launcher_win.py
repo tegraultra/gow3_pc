@@ -64,6 +64,7 @@ NEW_GROUP = {} if WINDOWS else {'start_new_session': True}
 UI_FONT, MONO_FONT, SERIF_FONT = 'Segoe UI', 'Consolas', 'Georgia'
 # This build; GitHub release tags are windows-v<VERSION>.
 VERSION = '2.5.0'
+TELEGRAM_URL = 'https://t.me/MKJH_APPS'  # the channel linked under the version in the sidebar
 RELEASES_API = 'https://api.github.com/repos/FelipePrado0/gow3_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/FelipePrado0/gow3_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'gow3-update'
@@ -1642,7 +1643,13 @@ class Launcher:
                                                'В игре: Insert или R3+L2\nоткрывает меню порта.'),
                                   bg=BG, fg=MUTED, font=self.font(UI_FONT, 9), justify='left', wraplength=self.px(210))
         self.side_note.pack(anchor='w', padx=self.px(22), pady=self.px((0, 4)))
-        tk.Label(side, text=f'v{VERSION}', bg=BG, fg=MUTED, font=self.font(UI_FONT, 9)).pack(anchor='w', padx=self.px(22), pady=self.px((0, 18)))
+        tk.Label(side, text=f'v{VERSION} · by MK-JH', bg=BG, fg=MUTED, font=self.font(UI_FONT, 9)).pack(anchor='w', padx=self.px(22), pady=self.px((0, 2)))
+        channel = tk.Label(side, text='Our Telegram channel', bg=BG, fg=ACCENT_HI, cursor='hand2',
+                           font=self.font(UI_FONT, 9), anchor='w')
+        channel.pack(anchor='w', padx=self.px(22), pady=self.px((0, 18)))
+        channel.bind('<Button-1>', lambda _e: open_url(TELEGRAM_URL))
+        channel.bind('<Enter>', lambda _e: channel.configure(fg=TEXT))
+        channel.bind('<Leave>', lambda _e: channel.configure(fg=ACCENT_HI))
 
         right = tk.Frame(self.root, bg=PANEL)
         right.pack(side='left', fill='both', expand=True)
